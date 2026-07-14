@@ -3,7 +3,7 @@ export const ENVS: Env[] = ["development", "staging", "production"];
 
 export interface Condition {
   attr: string;
-  op: "eq" | "neq" | "in";
+  op: "eq" | "neq" | "in" | "semver_gte";
   value: unknown;
 }
 

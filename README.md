@@ -4,7 +4,7 @@ Lightweight, self-hosted feature flags for React Native / Expo apps. Single Go b
 
 - **3 environments** out of the box: `development`, `staging`, `production` — independent state per flag, one API key each
 - **Deterministic percentage rollouts** — the same user always lands in the same bucket; raising the percent only ever adds users
-- **Attribute targeting** — `eq` / `neq` / `in` conditions over user attributes (plan, app version, …)
+- **Attribute targeting** — `eq` / `neq` / `in` / `semver_gte` conditions over user attributes (plan, app version, …)
 - **Fail-safe by design** — unknown operators and malformed rules evaluate to `false`; the public key can only evaluate, never read rules
 
 ## Quick start
@@ -124,6 +124,15 @@ DATABASE_URL='postgres://featherflags:featherflags@localhost:5433/featherflags?s
 go test ./...
 ```
 
+Integration tests (full HTTP lifecycle + SSE) run against a real Postgres and
+skip automatically when `TEST_DATABASE_URL` is unset:
+
+```bash
+docker compose up -d db
+TEST_DATABASE_URL='postgres://featherflags:featherflags@localhost:5433/featherflags?sslmode=disable' \
+  go test -race ./...
+```
+
 Stack: Go 1.26, [chi](https://github.com/go-chi/chi), [pgx](https://github.com/jackc/pgx). Migrations are embedded in the binary and applied on boot.
 
 ## Roadmap
@@ -132,7 +141,7 @@ Stack: Go 1.26, [chi](https://github.com/go-chi/chi), [pgx](https://github.com/j
 - [x] `@featherflags/react` SDK (`packages/sdk-react`) — pluggable storage cache, fail-safe defaults
 - [x] React dashboard (`apps/dashboard`) — per-environment toggles, rollout slider, conditions editor
 - [x] SSE stream for real-time flag updates (`GET /v1/stream` + `realtime` prop in the SDK)
-- [ ] `semver_gte` condition operator for app versions
+- [x] `semver_gte` condition operator for app versions (e.g. `{"attr":"appVersion","op":"semver_gte","value":"2.1.0"}`)
 
 ## License
 

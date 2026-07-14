@@ -4,11 +4,13 @@ package evaluate
 import (
 	"encoding/json"
 	"hash/fnv"
+	"strconv"
+	"strings"
 )
 
 type Condition struct {
 	Attr  string          `json:"attr"`
-	Op    string          `json:"op"` // eq | neq | in
+	Op    string          `json:"op"` // eq | neq | in | semver_gte
 	Value json.RawMessage `json:"value"`
 }
 
@@ -85,8 +87,53 @@ func matchCondition(c Condition, attrs map[string]string) bool {
 			}
 		}
 		return false
+	case "semver_gte":
+		var want string
+		if json.Unmarshal(c.Value, &want) != nil {
+			return false
+		}
+		return present && semverGTE(got, want)
 	default:
 		// Unknown operator: fail closed.
 		return false
 	}
+}
+
+// semverGTE reports a >= b for dotted numeric versions ("2.1.0", "v2.1").
+// Missing components count as 0; anything unparsable fails closed. This is
+// deliberately not full SemVer (no pre-release precedence): app stores ship
+// plain MAJOR.MINOR.PATCH, and fail-closed beats surprising matches.
+func semverGTE(a, b string) bool {
+	av, aok := parseVersion(a)
+	bv, bok := parseVersion(b)
+	if !aok || !bok {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if av[i] != bv[i] {
+			return av[i] > bv[i]
+		}
+	}
+	return true
+}
+
+func parseVersion(s string) ([3]int, bool) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	// Drop build/pre-release suffixes: "2.1.0-beta.1" compares as 2.1.0.
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
+	var v [3]int
+	parts := strings.Split(s, ".")
+	if len(parts) == 0 || len(parts) > 3 {
+		return v, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
 }

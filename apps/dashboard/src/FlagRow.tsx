@@ -151,8 +151,8 @@ function RuleEditor({
       const parsed = JSON.parse(text) as unknown;
       if (!Array.isArray(parsed)) throw new Error("must be a JSON array");
       for (const c of parsed as Condition[]) {
-        if (!c.attr || !["eq", "neq", "in"].includes(c.op)) {
-          throw new Error('each item needs "attr" and "op" (eq | neq | in)');
+        if (!c.attr || !["eq", "neq", "in", "semver_gte"].includes(c.op)) {
+          throw new Error('each item needs "attr" and "op" (eq | neq | in | semver_gte)');
         }
       }
       return parsed as Condition[];

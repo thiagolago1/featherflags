@@ -86,6 +86,13 @@ func TestConditions(t *testing.T) {
 		{"in match", Condition{Attr: "plan", Op: "in", Value: raw(`["pro","premium"]`)}, map[string]string{"plan": "pro"}, true},
 		{"in miss", Condition{Attr: "plan", Op: "in", Value: raw(`["pro","premium"]`)}, map[string]string{"plan": "free"}, false},
 		{"unknown op fails closed", Condition{Attr: "plan", Op: "gt", Value: raw(`"1"`)}, map[string]string{"plan": "2"}, false},
+		{"semver equal", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"2.1.0"`)}, map[string]string{"appVersion": "2.1.0"}, true},
+		{"semver newer", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"2.1.0"`)}, map[string]string{"appVersion": "2.2"}, true},
+		{"semver older", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"2.0"`)}, map[string]string{"appVersion": "1.9.9"}, false},
+		{"semver v-prefix and prerelease", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"2.1.0"`)}, map[string]string{"appVersion": "v2.1.0-beta.1"}, true},
+		{"semver major beats minor.patch", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"9.9.9"`)}, map[string]string{"appVersion": "10.0.0"}, true},
+		{"semver garbage fails closed", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"2.1.0"`)}, map[string]string{"appVersion": "latest"}, false},
+		{"semver missing attr", Condition{Attr: "appVersion", Op: "semver_gte", Value: raw(`"2.1.0"`)}, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

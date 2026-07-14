@@ -99,6 +99,15 @@ npm run dev   # proxies /admin to the API on :8080
 Authentication is the server's `ADMIN_TOKEN`, entered once per session. For a
 deployed dashboard set `VITE_API_URL` at build time.
 
+## Deploy (Render)
+
+One-click via [Blueprint](https://render.com/docs/infrastructure-as-code): the
+included `render.yaml` provisions the API (Docker), Postgres, Redis and the
+static dashboard. After the first deploy:
+
+1. Copy the generated `ADMIN_TOKEN` from the API service's Environment tab.
+2. Set the dashboard's `VITE_API_URL` to the API's public URL and redeploy it.
+
 ## Development
 
 ```bash

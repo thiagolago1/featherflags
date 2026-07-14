@@ -30,6 +30,11 @@ export interface FlagsProviderProps {
   storage?: FlagStorage;
   /** Re-fetch interval in ms. 0 disables polling (default 60000). */
   pollIntervalMs?: number;
+  /**
+   * Subscribe to the server's SSE stream and re-evaluate the instant a flag
+   * changes. Polling (if enabled) keeps running as a fallback.
+   */
+  realtime?: boolean;
   children: ReactNode;
 }
 
@@ -39,6 +44,7 @@ export function FlagsProvider({
   user,
   storage,
   pollIntervalMs = 60_000,
+  realtime = false,
   children,
 }: FlagsProviderProps) {
   const client = useMemo(
@@ -75,12 +81,14 @@ export function FlagsProvider({
 
     const interval =
       pollIntervalMs > 0 ? setInterval(() => void refresh(), pollIntervalMs) : undefined;
+    const unsubscribe = realtime ? client.subscribe(() => void refresh()) : undefined;
     return () => {
       cancelled = true;
       if (interval) clearInterval(interval);
+      unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, refresh, pollIntervalMs, userKey]);
+  }, [client, refresh, pollIntervalMs, realtime, userKey]);
 
   const value = useMemo(() => ({ flags, isLoading, refresh }), [flags, isLoading, refresh]);
   return <FlagsContext.Provider value={value}>{children}</FlagsContext.Provider>;

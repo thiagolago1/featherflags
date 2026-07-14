@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"slices"
@@ -21,10 +22,12 @@ import (
 type Server struct {
 	store      *store.Store
 	adminToken string
+	hub        *hub
 }
 
 func New(st *store.Store, adminToken string) http.Handler {
-	s := &Server{store: st, adminToken: adminToken}
+	s := &Server{store: st, adminToken: adminToken, hub: newHub()}
+	st.SetOnChange(s.hub.broadcast)
 
 	r := chi.NewRouter()
 	r.Use(cors)
@@ -32,23 +35,84 @@ func New(st *store.Store, adminToken string) http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(10 * time.Second))
 
-	r.Get("/health", s.health)
-	r.Post("/v1/evaluate", s.evaluateHandler)
+	// Long-lived SSE connection — must stay outside the request timeout.
+	r.Get("/v1/stream", s.streamHandler)
 
-	r.Route("/admin", func(r chi.Router) {
-		r.Use(s.requireAdmin)
-		r.Post("/projects", s.createProject)
-		r.Get("/projects", s.listProjects)
-		r.Post("/projects/{projectID}/flags", s.createFlag)
-		r.Get("/projects/{projectID}/flags", s.listFlags)
-		r.Patch("/flags/{flagID}/rules/{env}", s.updateRule)
-		r.Post("/flags/{flagID}/archive", s.archiveFlag)
-		r.Post("/flags/{flagID}/unarchive", s.unarchiveFlag)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(10 * time.Second))
+
+		r.Get("/health", s.health)
+		r.Post("/v1/evaluate", s.evaluateHandler)
+
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(s.requireAdmin)
+			r.Post("/projects", s.createProject)
+			r.Get("/projects", s.listProjects)
+			r.Post("/projects/{projectID}/flags", s.createFlag)
+			r.Get("/projects/{projectID}/flags", s.listFlags)
+			r.Patch("/flags/{flagID}/rules/{env}", s.updateRule)
+			r.Post("/flags/{flagID}/archive", s.archiveFlag)
+			r.Post("/flags/{flagID}/unarchive", s.unarchiveFlag)
+		})
 	})
 
 	return r
+}
+
+// streamHandler is the SSE feed: one "change" event whenever any flag in the
+// key's project is written. Clients respond by re-calling /v1/evaluate.
+// The API key may come via header or query (EventSource can't set headers).
+func (s *Server) streamHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.Header.Get("X-API-Key")
+	if apiKey == "" {
+		apiKey = r.URL.Query().Get("apiKey")
+	}
+	if apiKey == "" {
+		writeErr(w, http.StatusUnauthorized, "missing API key")
+		return
+	}
+	projectID, _, err := s.store.ResolveAPIKey(r.Context(), apiKey)
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusUnauthorized, "invalid API key")
+		return
+	}
+	if err != nil {
+		internalErr(w, err)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "retry: 3000\n\n")
+	flusher.Flush()
+
+	changes, cancel := s.hub.subscribe(projectID)
+	defer cancel()
+
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-changes:
+			fmt.Fprint(w, "event: change\ndata: {}\n\n")
+			flusher.Flush()
+		case <-heartbeat.C:
+			// Comment line keeps idle connections alive through proxies.
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
 }
 
 // cors is permissive: every route is protected by a credential header (admin

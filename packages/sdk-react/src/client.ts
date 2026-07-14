@@ -94,4 +94,83 @@ export class FeatherflagsClient {
       return (await this.loadCached(user)) ?? {};
     }
   }
+
+  /**
+   * Subscribe to the server's SSE stream. `onChange` fires whenever any flag
+   * in this environment's project is updated — callers should re-evaluate.
+   * Reconnects automatically with backoff. Returns an unsubscribe function.
+   *
+   * Uses XMLHttpRequest incremental reads (works on React Native, where fetch
+   * bodies can't stream) and falls back to fetch streaming elsewhere.
+   */
+  subscribe(onChange: () => void): () => void {
+    let stopped = false;
+    let attempt = 0;
+    let abort: (() => void) | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const url = `${this.baseUrl}/v1/stream?apiKey=${encodeURIComponent(this.apiKey)}`;
+
+    const scheduleReconnect = () => {
+      if (stopped) return;
+      const delay = Math.min(1000 * 2 ** attempt, 30_000);
+      attempt += 1;
+      retryTimer = setTimeout(connect, delay);
+    };
+
+    // Every complete SSE frame ends in a blank line; we only care whether a
+    // "change" event is in the newly received chunk.
+    const handleChunk = (chunk: string) => {
+      if (chunk.includes("event: change")) {
+        attempt = 0; // healthy connection
+        onChange();
+      }
+    };
+
+    const connect = () => {
+      if (stopped) return;
+
+      if (typeof XMLHttpRequest !== "undefined") {
+        const xhr = new XMLHttpRequest();
+        let seen = 0;
+        xhr.open("GET", url);
+        xhr.setRequestHeader("Accept", "text/event-stream");
+        xhr.onprogress = () => {
+          handleChunk(xhr.responseText.slice(seen));
+          seen = xhr.responseText.length;
+        };
+        xhr.onerror = scheduleReconnect;
+        xhr.onload = scheduleReconnect; // server closed: reconnect
+        xhr.send();
+        abort = () => xhr.abort();
+        return;
+      }
+
+      // Node / environments with streaming fetch
+      const controller = new AbortController();
+      abort = () => controller.abort();
+      fetch(url, { signal: controller.signal, headers: { Accept: "text/event-stream" } })
+        .then(async (res) => {
+          if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            handleChunk(decoder.decode(value, { stream: true }));
+          }
+          scheduleReconnect();
+        })
+        .catch(() => {
+          if (!stopped) scheduleReconnect();
+        });
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      clearTimeout(retryTimer);
+      abort?.();
+    };
+  }
 }

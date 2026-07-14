@@ -27,8 +27,19 @@ var envKeyPrefix = map[string]string{
 }
 
 type Store struct {
-	pool  *pgxpool.Pool
-	redis *redis.Client // optional; nil means no caching
+	pool     *pgxpool.Pool
+	redis    *redis.Client // optional; nil means no caching
+	onChange func(projectID string)
+}
+
+// SetOnChange registers a callback fired after any admin write that can alter
+// evaluation results (used by the SSE hub). Must be set before serving.
+func (s *Store) SetOnChange(fn func(projectID string)) { s.onChange = fn }
+
+func (s *Store) emitChange(projectID string) {
+	if s.onChange != nil {
+		s.onChange(projectID)
+	}
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -210,6 +221,7 @@ func (s *Store) CreateFlag(ctx context.Context, projectID, key string, descripti
 		return nil, err
 	}
 	s.invalidateProject(ctx, projectID)
+	s.emitChange(projectID)
 	return f, nil
 }
 
@@ -269,6 +281,7 @@ func (s *Store) UpdateRule(ctx context.Context, flagID, env string, enabled *boo
 	}
 	if projectID, err := s.projectIDForFlag(ctx, flagID); err == nil {
 		s.invalidateProject(ctx, projectID)
+		s.emitChange(projectID)
 	}
 	return nil
 }
@@ -283,6 +296,7 @@ func (s *Store) ArchiveFlag(ctx context.Context, flagID string, archived bool) e
 	}
 	if projectID, err := s.projectIDForFlag(ctx, flagID); err == nil {
 		s.invalidateProject(ctx, projectID)
+		s.emitChange(projectID)
 	}
 	return nil
 }
@@ -296,17 +310,29 @@ type EvalRule struct {
 	Conditions     json.RawMessage
 }
 
-// RulesForAPIKey resolves an API key to its project+environment rule set,
-// served from Redis when available. Returns ErrNotFound for unknown keys.
-func (s *Store) RulesForAPIKey(ctx context.Context, apiKey string) ([]EvalRule, error) {
+// ResolveAPIKey maps an API key to its project and environment, served from
+// Redis when available. Returns ErrNotFound for unknown keys.
+func (s *Store) ResolveAPIKey(ctx context.Context, apiKey string) (projectID, env string, err error) {
 	ki, hit := s.cachedKeyInfo(ctx, apiKey)
 	if !hit {
 		err := s.pool.QueryRow(ctx,
 			`SELECT project_id, env FROM api_keys WHERE key = $1`, apiKey).Scan(&ki.ProjectID, &ki.Env)
 		if err != nil {
-			return nil, err
+			return "", "", err
 		}
 		s.storeCache(ctx, apiKeyCacheKey(apiKey), ki, apiKeyTTL)
+	}
+	return ki.ProjectID, ki.Env, nil
+}
+
+// RulesForAPIKey resolves an API key to its project+environment rule set,
+// served from Redis when available. Returns ErrNotFound for unknown keys.
+func (s *Store) RulesForAPIKey(ctx context.Context, apiKey string) ([]EvalRule, error) {
+	var ki keyInfo
+	var err error
+	ki.ProjectID, ki.Env, err = s.ResolveAPIKey(ctx, apiKey)
+	if err != nil {
+		return nil, err
 	}
 	if rules, ok := s.cachedRules(ctx, ki.ProjectID, ki.Env); ok {
 		return rules, nil

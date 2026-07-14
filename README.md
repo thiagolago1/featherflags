@@ -69,11 +69,17 @@ Fail-safe contract: the SDK never throws. Cold start hydrates from the storage
 cache before the network round-trip; if the server is unreachable it serves the
 last cached values, and with no cache every flag is `false`.
 
+**Real-time**: pass `realtime` to the provider and flag changes land in the app
+the instant they're saved in the dashboard (SSE with automatic reconnection;
+polling stays on as a fallback). Measured admin-write → client-update latency:
+~30ms on a local stack.
+
 ## API
 
 | Method | Path | Auth |
 |---|---|---|
 | `POST` | `/v1/evaluate` | `X-API-Key` (per environment) |
+| `GET` | `/v1/stream` | `X-API-Key` or `?apiKey=` (SSE) |
 | `GET` | `/health` | — |
 | `POST` | `/admin/projects` | Bearer `ADMIN_TOKEN` |
 | `GET` | `/admin/projects` | Bearer |
@@ -125,7 +131,7 @@ Stack: Go 1.26, [chi](https://github.com/go-chi/chi), [pgx](https://github.com/j
 - [x] Redis cache for rule sets (optional `REDIS_URL`; invalidated on admin writes, TTL safety net)
 - [x] `@featherflags/react` SDK (`packages/sdk-react`) — pluggable storage cache, fail-safe defaults
 - [x] React dashboard (`apps/dashboard`) — per-environment toggles, rollout slider, conditions editor
-- [ ] SSE stream for real-time flag updates
+- [x] SSE stream for real-time flag updates (`GET /v1/stream` + `realtime` prop in the SDK)
 - [ ] `semver_gte` condition operator for app versions
 
 ## License

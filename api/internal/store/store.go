@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,6 +31,9 @@ type Store struct {
 	pool     *pgxpool.Pool
 	redis    *redis.Client // optional; nil means no caching
 	onChange func(projectID string)
+
+	localMu      sync.Mutex
+	localWindows map[string]*localWindow // used by Allow() when redis is nil
 }
 
 // SetOnChange registers a callback fired after any admin write that can alter

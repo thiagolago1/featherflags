@@ -13,9 +13,24 @@ import (
 	"github.com/thiagolago1/featherflags/api/internal/store"
 )
 
+// weakAdminTokens are values that must never be used outside local dev —
+// booting with one of these in a real environment means someone forgot to
+// generate a real secret.
+var weakAdminTokens = map[string]bool{
+	"":                      true,
+	"change-me-admin-token": true,
+}
+
 func main() {
 	databaseURL := mustEnv("DATABASE_URL")
 	adminToken := mustEnv("ADMIN_TOKEN")
+	if weakAdminTokens[adminToken] || len(adminToken) < 32 {
+		log.Fatalf("ADMIN_TOKEN is missing, default, or too short (<32 chars) — generate a real secret before starting")
+	}
+	// The API is meant to be called only by the dashboard BFF (see plan:
+	// Next.js proxy), never directly by a browser, so this is empty by
+	// default in a properly network-isolated deployment.
+	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -43,7 +58,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           server.New(st, adminToken),
+		Handler:           server.New(st, adminToken, allowedOrigin),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

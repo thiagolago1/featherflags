@@ -36,7 +36,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	ts := httptest.NewServer(server.New(st, adminToken))
+	ts := httptest.NewServer(server.New(st, adminToken, ""))
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -182,6 +182,34 @@ func TestAuth(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 401 {
 		t.Errorf("bad api key: want 401, got %d", res.StatusCode)
+	}
+}
+
+func TestCORSRestrictedToAllowedOrigin(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping integration tests")
+	}
+	ctx := context.Background()
+	st, err := store.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(st.Close)
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	ts := httptest.NewServer(server.New(st, adminToken, "https://dashboard.example.com"))
+	t.Cleanup(ts.Close)
+
+	req, _ := http.NewRequest("GET", ts.URL+"/health", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if got := res.Header.Get("Access-Control-Allow-Origin"); got != "https://dashboard.example.com" {
+		t.Errorf("Access-Control-Allow-Origin: want configured origin, got %q", got)
 	}
 }
 

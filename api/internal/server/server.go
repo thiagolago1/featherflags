@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,34 +20,66 @@ import (
 	"github.com/thiagolago1/featherflags/api/internal/store"
 )
 
+// maxFieldLen bounds free-text admin input (project/flag names, descriptions)
+// to keep payloads sane; it's not a business rule, just abuse prevention.
+const maxFieldLen = 256
+
+// Rate limits are intentionally generous: they exist to blunt abuse/DoS, not
+// to constrain legitimate traffic. Tuned per route class.
+const (
+	evaluateRateLimit  = 120 // requests per IP per window
+	evaluateRateWindow = time.Minute
+	adminRateLimit     = 60
+	adminRateWindow    = time.Minute
+)
+
 type Server struct {
-	store      *store.Store
-	adminToken string
-	hub        *hub
+	store         *store.Store
+	adminToken    string
+	allowedOrigin string
+	hub           *hub
+	metrics       *metrics
+	log           *slog.Logger
 }
 
-func New(st *store.Store, adminToken string) http.Handler {
-	s := &Server{store: st, adminToken: adminToken, hub: newHub()}
+// New wires the HTTP API. allowedOrigin is the single origin permitted to
+// call this API cross-origin (e.g. the dashboard BFF) — in production this
+// service should also sit behind a network policy that blocks everything but
+// that caller, so CORS here is defense in depth, not the primary boundary.
+func New(st *store.Store, adminToken, allowedOrigin string) http.Handler {
+	s := &Server{
+		store:         st,
+		adminToken:    adminToken,
+		allowedOrigin: allowedOrigin,
+		hub:           newHub(),
+		metrics:       &metrics{},
+		log:           slog.Default(),
+	}
 	st.SetOnChange(s.hub.broadcast)
 
 	r := chi.NewRouter()
-	r.Use(cors)
+	r.Use(s.cors)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(s.requestLogger)
 	r.Use(middleware.Recoverer)
+	r.Use(s.metrics.middleware)
+
+	r.Get("/metrics", s.metrics.handler())
 
 	// Long-lived SSE connection — must stay outside the request timeout.
-	r.Get("/v1/stream", s.streamHandler)
+	r.With(s.rateLimit("stream", evaluateRateLimit, evaluateRateWindow)).Get("/v1/stream", s.streamHandler)
 
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Timeout(10 * time.Second))
 
 		r.Get("/health", s.health)
-		r.Post("/v1/evaluate", s.evaluateHandler)
+		r.With(s.rateLimit("evaluate", evaluateRateLimit, evaluateRateWindow)).
+			Post("/v1/evaluate", s.evaluateHandler)
 
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.requireAdmin)
+			r.Use(s.rateLimit("admin", adminRateLimit, adminRateWindow))
 			r.Post("/projects", s.createProject)
 			r.Get("/projects", s.listProjects)
 			r.Post("/projects/{projectID}/flags", s.createFlag)
@@ -115,11 +148,16 @@ func (s *Server) streamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// cors is permissive: every route is protected by a credential header (admin
-// bearer or API key), never by cookies, so cross-origin reads are safe.
-func cors(next http.Handler) http.Handler {
+// cors only allows the configured origin (the dashboard BFF) to read admin
+// responses cross-origin. SDK traffic (evaluate/stream) is credentialed by
+// API key and not cookie-based, so it's unaffected by CORS either way — this
+// header only governs what a browser will expose to JS.
+func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if s.allowedOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", s.allowedOrigin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key")
 		if r.Method == http.MethodOptions {
@@ -128,6 +166,48 @@ func cors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// requestLogger emits one structured JSON log line per request.
+func (s *Server) requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		s.log.Info("request",
+			"request_id", middleware.GetReqID(r.Context()),
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", sw.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"remote_addr", r.RemoteAddr,
+		)
+	})
+}
+
+// rateLimit throttles requests per client IP within the given window. name
+// namespaces the counter per route class so /admin and /v1/evaluate don't
+// share a budget.
+func (s *Server) rateLimit(name string, limit int, window time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := clientIP(r)
+			if !s.store.Allow(r.Context(), name+":"+ip, limit, window) {
+				s.metrics.rateLimitedHits.Add(1)
+				writeErr(w, http.StatusTooManyRequests, "rate limit exceeded")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func clientIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if i := strings.LastIndex(ip, ":"); i != -1 {
+		ip = ip[:i]
+	}
+	return ip
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {
@@ -212,6 +292,10 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if len(body.Name) > maxFieldLen {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("name must be at most %d characters", maxFieldLen))
+		return
+	}
 	p, err := s.store.CreateProject(r.Context(), body.Name)
 	if err != nil {
 		internalErr(w, err)
@@ -236,6 +320,10 @@ func (s *Server) createFlag(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
 		writeErr(w, http.StatusBadRequest, "key is required")
+		return
+	}
+	if len(body.Key) > maxFieldLen || (body.Description != nil && len(*body.Description) > maxFieldLen) {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("key/description must be at most %d characters", maxFieldLen))
 		return
 	}
 	f, err := s.store.CreateFlag(r.Context(), chi.URLParam(r, "projectID"), body.Key, body.Description)
@@ -316,6 +404,6 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 }
 
 func internalErr(w http.ResponseWriter, err error) {
-	log.Printf("internal error: %v", err)
+	slog.Error("internal error", "error", err)
 	writeErr(w, http.StatusInternalServerError, "internal error")
 }

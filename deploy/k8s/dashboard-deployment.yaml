@@ -1,0 +1,78 @@
+# Next.js BFF — the only component exposed to the internet (via
+# dashboard-ingress.yaml). It's the sole holder of INTERNAL_API_TOKEN and
+# the only thing allowed to reach featherflags-api (see networkpolicy.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: featherflags-dashboard
+  namespace: featherflags
+  labels:
+    app: featherflags-dashboard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: featherflags-dashboard
+  template:
+    metadata:
+      labels:
+        app: featherflags-dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: REGISTRY/featherflags-dashboard:TAG # set by CI/CD pipeline
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXTAUTH_URL
+              value: "https://flags.company.internal"
+            - name: INTERNAL_API_URL
+              value: "http://featherflags-api:8080"
+            - name: NEXT_PUBLIC_SSO_ENABLED
+              value: "true" # flip to "false" for credentials-only deployments
+            - name: OIDC_ISSUER
+              value: "https://sso.company.com/.well-known/openid-configuration"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-dashboard-secrets
+                  key: DATABASE_URL
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-dashboard-secrets
+                  key: NEXTAUTH_SECRET
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-dashboard-secrets
+                  key: INTERNAL_API_TOKEN
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-dashboard-secrets
+                  key: OIDC_CLIENT_ID
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-dashboard-secrets
+                  key: OIDC_CLIENT_SECRET
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

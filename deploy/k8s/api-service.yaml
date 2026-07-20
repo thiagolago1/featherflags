@@ -1,0 +1,13 @@
+# ClusterIP (default type) — deliberately not a LoadBalancer/NodePort and
+# has no Ingress. Only reachable from inside the cluster network.
+apiVersion: v1
+kind: Service
+metadata:
+  name: featherflags-api
+  namespace: featherflags
+spec:
+  selector:
+    app: featherflags-api
+  ports:
+    - port: 8080
+      targetPort: 8080

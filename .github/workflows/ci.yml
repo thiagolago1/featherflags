@@ -55,6 +55,14 @@ jobs:
     defaults:
       run:
         working-directory: apps/dashboard
+    env:
+      # Build-time-only placeholders — no real secret or live DB is needed to
+      # compile the Next.js app; nothing here is invoked until request time.
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci?schema=auth
+      NEXTAUTH_SECRET: ci-build-placeholder-secret
+      NEXTAUTH_URL: http://localhost:3000
+      INTERNAL_API_URL: http://localhost:8080
+      INTERNAL_API_TOKEN: ci-build-placeholder-token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,5 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build ./api -t featherflags:ci
+      - name: Build API image
+        run: docker build ./api -t featherflags-api:ci
+      - name: Build dashboard image
+        run: docker build ./apps/dashboard -t featherflags-dashboard:ci

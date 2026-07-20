@@ -1,0 +1,41 @@
+// Auth-only schema for the dashboard BFF. Deliberately separate from the Go
+// API's domain (projects/flags/api_keys) — the dashboard owns user identity,
+// the API owns flag data. Lives in its own Postgres schema ("auth") so a
+// single DATABASE_URL can be shared without table name collisions.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["auth"]
+}
+
+// password is null for users that only ever authenticate via OIDC/SSO.
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String?
+  createdAt    DateTime  @default(now())
+  accounts     Account[]
+
+  @@schema("auth")
+}
+
+// Links a User to an OIDC identity (issuer + subject), so SSO logins map
+// back to the same User row as a credentials login with the same email.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String
+  providerAccountId String
+  refreshToken      String?
+  accessToken       String?
+  expiresAt         Int?
+
+  @@unique([provider, providerAccountId])
+  @@schema("auth")
+}

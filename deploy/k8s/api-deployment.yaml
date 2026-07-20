@@ -1,0 +1,64 @@
+# Go API — internal only. No Ingress is defined for this service anywhere
+# in this directory; it must never be reachable except from the dashboard
+# pod (enforced by networkpolicy.yaml) and cluster-internal callers.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: featherflags-api
+  namespace: featherflags
+  labels:
+    app: featherflags-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: featherflags-api
+  template:
+    metadata:
+      labels:
+        app: featherflags-api
+    spec:
+      containers:
+        - name: api
+          image: REGISTRY/featherflags-api:TAG # set by CI/CD pipeline
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: ALLOWED_ORIGIN
+              value: "https://flags.company.internal" # dashboard's public origin
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-api-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-api-secrets
+                  key: REDIS_URL
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: featherflags-api-secrets
+                  key: ADMIN_TOKEN
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

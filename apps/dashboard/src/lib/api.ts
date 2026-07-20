@@ -37,17 +37,13 @@ export class ApiError extends Error {
   }
 }
 
-/** Same-origin in dev (vite proxy); VITE_API_URL for a deployed dashboard. */
-const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
-
-async function request<T>(token: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+// Same-origin only: this hits the Next.js BFF proxy (src/app/api/backend),
+// which is the only thing that knows the real API's URL and service token.
+// The session cookie (httpOnly, set by next-auth) rides along automatically.
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`/api/backend/${path}`, {
     ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers: { "Content-Type": "application/json", ...init?.headers },
   });
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
@@ -64,36 +60,34 @@ async function request<T>(token: string, path: string, init?: RequestInit): Prom
 }
 
 export const api = {
-  listProjects: (token: string) => request<Project[]>(token, "/admin/projects"),
+  listProjects: () => request<Project[]>("admin/projects"),
 
-  createProject: (token: string, name: string) =>
-    request<Project>(token, "/admin/projects", {
+  createProject: (name: string) =>
+    request<Project>("admin/projects", {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
 
-  listFlags: (token: string, projectId: string) =>
-    request<Flag[]>(token, `/admin/projects/${projectId}/flags`),
+  listFlags: (projectId: string) => request<Flag[]>(`admin/projects/${projectId}/flags`),
 
-  createFlag: (token: string, projectId: string, key: string, description?: string) =>
-    request<Flag>(token, `/admin/projects/${projectId}/flags`, {
+  createFlag: (projectId: string, key: string, description?: string) =>
+    request<Flag>(`admin/projects/${projectId}/flags`, {
       method: "POST",
       body: JSON.stringify({ key, description }),
     }),
 
   updateRule: (
-    token: string,
     flagId: string,
     env: Env,
     patch: { enabled?: boolean; rolloutPercent?: number; conditions?: Condition[] | null },
   ) =>
-    request<void>(token, `/admin/flags/${flagId}/rules/${env}`, {
+    request<void>(`admin/flags/${flagId}/rules/${env}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
 
-  setArchived: (token: string, flagId: string, archived: boolean) =>
-    request<void>(token, `/admin/flags/${flagId}/${archived ? "archive" : "unarchive"}`, {
+  setArchived: (flagId: string, archived: boolean) =>
+    request<void>(`admin/flags/${flagId}/${archived ? "archive" : "unarchive"}`, {
       method: "POST",
       body: "{}",
     }),

@@ -1,90 +1,36 @@
+"use client";
+
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { api, ApiError, ENVS, type Env, type Flag, type Project } from "./api";
+import { signOut } from "next-auth/react";
+import { api, ApiError, ENVS, type Env, type Flag, type Project } from "@/lib/api";
 import { FlagRow } from "./FlagRow";
 
-const TOKEN_KEY = "featherflags.adminToken";
-
-export default function App() {
-  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem(TOKEN_KEY));
-  if (!token) {
-    return (
-      <TokenGate
-        onSubmit={(t) => {
-          sessionStorage.setItem(TOKEN_KEY, t);
-          setToken(t);
-        }}
-      />
-    );
-  }
-  return (
-    <Dashboard
-      token={token}
-      onAuthError={() => {
-        sessionStorage.removeItem(TOKEN_KEY);
-        setToken(null);
-      }}
-    />
-  );
-}
-
-function TokenGate({ onSubmit }: { onSubmit: (token: string) => void }) {
-  const [value, setValue] = useState("");
-  return (
-    <div className="gate">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (value.trim()) onSubmit(value.trim());
-        }}
-      >
-        <div className="wordmark">
-          <span className="feather">🪶</span> featherflags
-        </div>
-        <p>Paste the server&apos;s admin token to open the dashboard.</p>
-        <input
-          type="password"
-          placeholder="Admin token"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          autoFocus
-        />
-        <button className="btn btn-primary" type="submit" disabled={!value.trim()}>
-          Open dashboard
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function Dashboard({ token, onAuthError }: { token: string; onAuthError: () => void }) {
+export function Dashboard({ userEmail }: { userEmail: string }) {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [flags, setFlags] = useState<Flag[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  const fail = useCallback(
-    (err: unknown) => {
-      if (err instanceof ApiError && err.status === 401) {
-        onAuthError();
-        return;
-      }
-      clearTimeout(toastTimer.current);
-      setToast(err instanceof Error ? err.message : "Something went wrong");
-      toastTimer.current = setTimeout(() => setToast(null), 4000);
-    },
-    [onAuthError],
-  );
+  const fail = useCallback((err: unknown) => {
+    if (err instanceof ApiError && err.status === 401) {
+      void signOut({ callbackUrl: "/login" });
+      return;
+    }
+    clearTimeout(toastTimer.current);
+    setToast(err instanceof Error ? err.message : "Something went wrong");
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
   const loadProjects = useCallback(async () => {
     try {
-      const ps = await api.listProjects(token);
+      const ps = await api.listProjects();
       setProjects(ps);
       setSelectedId((cur) => cur ?? ps[0]?.id ?? null);
     } catch (err) {
       fail(err);
     }
-  }, [token, fail]);
+  }, [fail]);
 
   useEffect(() => {
     void loadProjects();
@@ -93,11 +39,11 @@ function Dashboard({ token, onAuthError }: { token: string; onAuthError: () => v
   const loadFlags = useCallback(async () => {
     if (!selectedId) return;
     try {
-      setFlags(await api.listFlags(token, selectedId));
+      setFlags(await api.listFlags(selectedId));
     } catch (err) {
       fail(err);
     }
-  }, [token, selectedId, fail]);
+  }, [selectedId, fail]);
 
   useEffect(() => {
     setFlags(null);
@@ -108,7 +54,7 @@ function Dashboard({ token, onAuthError }: { token: string; onAuthError: () => v
 
   async function createProject(name: string) {
     try {
-      const p = await api.createProject(token, name);
+      const p = await api.createProject(name);
       setProjects((ps) => [...(ps ?? []), p]);
       setSelectedId(p.id);
     } catch (err) {
@@ -119,7 +65,7 @@ function Dashboard({ token, onAuthError }: { token: string; onAuthError: () => v
   async function createFlag(key: string) {
     if (!selectedId) return;
     try {
-      const f = await api.createFlag(token, selectedId, key);
+      const f = await api.createFlag(selectedId, key);
       setFlags((fs) => [...(fs ?? []), f]);
     } catch (err) {
       fail(err);
@@ -144,6 +90,12 @@ function Dashboard({ token, onAuthError }: { token: string; onAuthError: () => v
           </button>
         ))}
         {projects && <NewItemForm placeholder="New project…" onCreate={createProject} />}
+        <div className="sidebar-footer">
+          <span className="mono">{userEmail}</span>
+          <button className="btn" onClick={() => void signOut({ callbackUrl: "/login" })}>
+            Sign out
+          </button>
+        </div>
       </nav>
 
       <main className="main">
@@ -153,13 +105,7 @@ function Dashboard({ token, onAuthError }: { token: string; onAuthError: () => v
               <h1>{selected.name}</h1>
             </div>
             <ApiKeys project={selected} />
-            <FlagsTable
-              flags={flags}
-              token={token}
-              onError={fail}
-              onChanged={loadFlags}
-              onCreate={createFlag}
-            />
+            <FlagsTable flags={flags} onError={fail} onChanged={loadFlags} onCreate={createFlag} />
           </>
         ) : projects && projects.length === 0 ? (
           <div className="empty">Create your first project in the sidebar to get started.</div>
@@ -204,13 +150,11 @@ function ApiKeys({ project }: { project: Project }) {
 
 function FlagsTable({
   flags,
-  token,
   onError,
   onChanged,
   onCreate,
 }: {
   flags: Flag[] | null;
-  token: string;
   onError: (err: unknown) => void;
   onChanged: () => Promise<void>;
   onCreate: (key: string) => Promise<void>;
@@ -236,7 +180,7 @@ function FlagsTable({
           </div>
         ) : (
           flags.map((f) => (
-            <FlagRow key={f.id} flag={f} token={token} onError={onError} onChanged={onChanged} />
+            <FlagRow key={f.id} flag={f} onError={onError} onChanged={onChanged} />
           ))
         )}
       </div>

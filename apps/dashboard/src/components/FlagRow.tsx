@@ -1,14 +1,14 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
-import { api, ENVS, type Condition, type Env, type Flag, type FlagRule } from "./api";
+import { api, ENVS, type Condition, type Env, type Flag, type FlagRule } from "@/lib/api";
 
 export function FlagRow({
   flag,
-  token,
   onError,
   onChanged,
 }: {
   flag: Flag;
-  token: string;
   onError: (err: unknown) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -27,7 +27,7 @@ export function FlagRow({
     }
     setBusyEnv(rule.env);
     try {
-      await api.updateRule(token, flag.id, rule.env, { enabled: !rule.enabled });
+      await api.updateRule(flag.id, rule.env, { enabled: !rule.enabled });
       await onChanged();
     } catch (err) {
       onError(err);
@@ -38,7 +38,7 @@ export function FlagRow({
 
   async function saveRule(env: Env, rolloutPercent: number, conditions: Condition[] | null) {
     try {
-      await api.updateRule(token, flag.id, env, { rolloutPercent, conditions });
+      await api.updateRule(flag.id, env, { rolloutPercent, conditions });
       await onChanged();
       setEditing(null);
     } catch (err) {
@@ -48,7 +48,7 @@ export function FlagRow({
 
   async function toggleArchived() {
     try {
-      await api.setArchived(token, flag.id, !flag.archived);
+      await api.setArchived(flag.id, !flag.archived);
       await onChanged();
     } catch (err) {
       onError(err);

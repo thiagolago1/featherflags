@@ -1,0 +1,29 @@
+# Adjust ingressClassName/annotations to match the company's ingress
+# controller (nginx, ALB, Traefik, ...). TLS via cert-manager is assumed
+# here; swap for however the company terminates TLS today.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: featherflags-dashboard
+  namespace: featherflags
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Ingress-level rate limiting as the first line of defense, in addition
+    # to the app-level limiter in the Go API.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["flags.company.internal"]
+      secretName: featherflags-dashboard-tls
+  rules:
+    - host: flags.company.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: featherflags-dashboard
+                port:
+                  number: 3000

@@ -1,0 +1,46 @@
+# Default-deny ingress for the namespace, then explicitly allow only what's
+# needed: the dashboard may call the API, and the ingress controller may
+# call the dashboard. Nothing else in (or outside) the cluster can reach
+# featherflags-api directly, even if someone finds its ClusterIP.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: featherflags
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dashboard-to-api
+  namespace: featherflags
+spec:
+  podSelector:
+    matchLabels:
+      app: featherflags-api
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: featherflags-dashboard
+      ports:
+        - port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-dashboard
+  namespace: featherflags
+spec:
+  podSelector:
+    matchLabels:
+      app: featherflags-dashboard
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: {} # restrict to the ingress-controller namespace
+      ports:
+        - port: 3000

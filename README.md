@@ -90,29 +90,38 @@ polling stays on as a fallback). Measured admin-write → client-update latency:
 
 ## Dashboard
 
-`apps/dashboard` — dark, dense admin UI (React + Vite, zero UI libs). Sidebar of
+`apps/dashboard` — dark, dense admin UI (Next.js, zero UI libs). Sidebar of
 projects, one row per flag with independent toggles for development / staging /
 production, rollout slider and JSON conditions editor per environment, one-click
 API-key copy. Toggling production asks for confirmation; the other environments
 just flip.
 
+The dashboard is a **BFF (backend-for-frontend)**, not a static SPA: it's the
+only thing that knows the Go API's address and service token, it authenticates
+users itself (email/password or company SSO via [next-auth](https://authjs.dev)),
+and it stores the session in an httpOnly cookie — never in `localStorage` /
+`sessionStorage`, and the API's URL/token never reach the browser. All admin
+calls from the browser go to same-origin `/api/backend/*`, which the server
+proxies to the internal API after checking the session.
+
 ```bash
 cd apps/dashboard
+cp .env.example .env       # fill in DATABASE_URL, NEXTAUTH_SECRET, INTERNAL_API_URL/TOKEN
 npm install
-npm run dev   # proxies /admin to the API on :8080
+npx prisma migrate dev     # creates the auth schema (users/accounts)
+ADMIN_EMAIL=you@company.com ADMIN_PASSWORD=... npm run db:seed  # first admin user
+npm run dev
 ```
 
-Authentication is the server's `ADMIN_TOKEN`, entered once per session. For a
-deployed dashboard set `VITE_API_URL` at build time.
+## Deploy (Kubernetes)
 
-## Deploy (Render)
-
-One-click via [Blueprint](https://render.com/docs/infrastructure-as-code): the
-included `render.yaml` provisions the API (Docker), Postgres, Redis and the
-static dashboard. After the first deploy:
-
-1. Copy the generated `ADMIN_TOKEN` from the API service's Environment tab.
-2. Set the dashboard's `VITE_API_URL` to the API's public URL and redeploy it.
+`deploy/k8s/` has the manifests for a real deployment: the Go API runs as a
+`ClusterIP`-only `Deployment` with no `Ingress` (only reachable from the
+dashboard pod, enforced by `networkpolicy.yaml`); the dashboard is the single
+public entry point via `dashboard-ingress.yaml`; secrets are pulled from the
+company's secret manager through `external-secrets.yaml` (adjust
+`secretStoreRef`/`remoteRef` to match). See the manifests' comments for what
+to fill in (registry/image, hostnames, OIDC issuer).
 
 ## Development
 
@@ -120,7 +129,7 @@ static dashboard. After the first deploy:
 cd api
 docker compose -f ../docker-compose.yml up -d db
 DATABASE_URL='postgres://featherflags:featherflags@localhost:5433/featherflags?sslmode=disable' \
-  ADMIN_TOKEN=dev go run ./cmd/server
+  ADMIN_TOKEN=dev-only-admin-token-please-rotate-me go run ./cmd/server
 go test ./...
 ```
 

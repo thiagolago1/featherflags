@@ -30,7 +30,10 @@ services:
     environment:
       DATABASE_URL: postgres://featherflags:featherflags@db:5432/featherflags?sslmode=disable
       REDIS_URL: redis://redis:6379
-      ADMIN_TOKEN: change-me-admin-token
+      # Dev-only value (>=32 chars, not the shipped default) — the server
+      # refuses to boot otherwise. Generate a real secret per environment.
+      ADMIN_TOKEN: dev-only-admin-token-please-rotate-me
+      ALLOWED_ORIGIN: http://localhost:3000
       PORT: "8080"
     ports:
       - "8080:8080"
@@ -39,6 +42,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  dashboard:
+    build: ./apps/dashboard
+    environment:
+      DATABASE_URL: postgres://featherflags:featherflags@db:5432/featherflags?sslmode=disable&schema=auth
+      NEXTAUTH_SECRET: dev-only-nextauth-secret-please-rotate-me
+      NEXTAUTH_URL: http://localhost:3000
+      INTERNAL_API_URL: http://api:8080
+      INTERNAL_API_TOKEN: dev-only-admin-token-please-rotate-me
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
 
 volumes:
   db-data:

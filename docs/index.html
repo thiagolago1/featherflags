@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>featherflags — self-hosted feature flags for React Native / Expo</title>
+<meta name="description" content="Lightweight, self-hosted feature flags for React Native / Expo apps. Single Go binary + Postgres.">
+<style>
+  :root {
+    --bg: #0a0d0a;
+    --bg-panel: #10140f;
+    --border: #1f2a1c;
+    --text: #d7e0d3;
+    --text-dim: #7c8a76;
+    --accent: #5eff8f;
+    --accent-dim: #2f8f52;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero {
+    padding: 96px 0 72px;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+  .hero h1 {
+    font-size: 2.6rem;
+    margin: 0 0 12px;
+    letter-spacing: -0.02em;
+  }
+  .hero .tagline {
+    color: var(--text-dim);
+    font-size: 1.1rem;
+    max-width: 560px;
+    margin: 0 auto 32px;
+  }
+  .cta-row { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 12px 22px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    border: 1px solid var(--accent-dim);
+  }
+  .btn.primary { background: var(--accent); color: #06140a; border-color: var(--accent); }
+  .btn.secondary { color: var(--accent); }
+
+  section { padding: 64px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: none; }
+  h2 {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 32px;
+  }
+  h2::before { content: "// "; color: var(--accent-dim); }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  .feature {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .feature h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    color: var(--accent);
+  }
+  .feature p { margin: 0; color: var(--text-dim); font-size: 0.92rem; }
+
+  pre {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-size: 0.86rem;
+  }
+  code { font-family: inherit; }
+  .tok-cmd { color: var(--accent); }
+  .tok-flag { color: #7fb0ff; }
+  .tok-str { color: #f2d089; }
+  .tok-comment { color: var(--text-dim); }
+
+  footer {
+    padding: 48px 0 80px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+  footer a { color: var(--text-dim); }
+
+  @media (max-width: 640px) {
+    .features { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 2rem; }
+    header.hero { padding: 64px 0 48px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>🪶 featherflags</h1>
+    <p class="tagline">Lightweight, self-hosted feature flags for React Native / Expo apps. Single Go binary + Postgres.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/thiagolago1/featherflags">View on GitHub</a>
+      <a class="btn secondary" href="#quick-start">Quick start</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Features</h2>
+    <div class="features">
+      <div class="feature">
+        <h3>3 environments</h3>
+        <p>development, staging, production out of the box — independent state per flag, one API key each.</p>
+      </div>
+      <div class="feature">
+        <h3>Deterministic rollouts</h3>
+        <p>The same user always lands in the same bucket. Raising the percent only ever adds users, never removes them.</p>
+      </div>
+      <div class="feature">
+        <h3>Attribute targeting</h3>
+        <p><code>eq</code> / <code>neq</code> / <code>in</code> / <code>semver_gte</code> conditions over user attributes like plan or app version.</p>
+      </div>
+      <div class="feature">
+        <h3>Fail-safe by design</h3>
+        <p>Unknown operators and malformed rules evaluate to false. The public key can only evaluate, never read rules.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quick-start">
+  <div class="wrap">
+    <h2>Quick start</h2>
+    <pre><code><span class="tok-cmd">docker compose up -d</span></code></pre>
+
+    <p class="tok-comment">Create a project (returns one API key per environment):</p>
+    <pre><code><span class="tok-cmd">curl</span> -X POST localhost:8080/admin/projects \
+  -H <span class="tok-str">"Authorization: Bearer change-me-admin-token"</span> \
+  -H <span class="tok-str">"Content-Type: application/json"</span> \
+  -d <span class="tok-str">'{"name":"my-app"}'</span></code></pre>
+
+    <p class="tok-comment">Create a flag and enable it in development at 50% for premium users:</p>
+    <pre><code><span class="tok-cmd">curl</span> -X POST localhost:8080/admin/projects/&lt;projectId&gt;/flags \
+  -H <span class="tok-str">"Authorization: Bearer change-me-admin-token"</span> \
+  -H <span class="tok-str">"Content-Type: application/json"</span> \
+  -d <span class="tok-str">'{"key":"new-checkout"}'</span>
+
+<span class="tok-cmd">curl</span> -X PATCH localhost:8080/admin/flags/&lt;flagId&gt;/rules/development \
+  -H <span class="tok-str">"Authorization: Bearer change-me-admin-token"</span> \
+  -H <span class="tok-str">"Content-Type: application/json"</span> \
+  -d <span class="tok-str">'{"enabled":true,"rolloutPercent":50,"conditions":[{"attr":"plan","op":"eq","value":"premium"}]}'</span></code></pre>
+
+    <p class="tok-comment">Evaluate from the client — this is all the app ever calls:</p>
+    <pre><code><span class="tok-cmd">curl</span> -X POST localhost:8080/v1/evaluate \
+  -H <span class="tok-str">"X-API-Key: ff_dev_..."</span> \
+  -H <span class="tok-str">"Content-Type: application/json"</span> \
+  -d <span class="tok-str">'{"userId":"user-123","attributes":{"plan":"premium"}}'</span>
+<span class="tok-comment"># → {"flags":{"new-checkout":true}}</span></code></pre>
+  </div>
+</section>
+
+<section style="border-bottom:none; text-align:center; padding-top: 48px;">
+  <div class="wrap">
+    <h2 style="text-align:center;">Get started</h2>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/thiagolago1/featherflags">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    featherflags — <a href="https://github.com/thiagolago1/featherflags/blob/main/LICENSE">MIT License</a>
+  </div>
+</footer>
+
+</body>
+</html>
